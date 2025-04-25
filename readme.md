@@ -1,8 +1,29 @@
+# Azure Autoscaler
+
 Visit us at 
 
 www.AzureAutoscaler.com
 
-# Azure Autoscaler Reference
+Azure Autoscaler is a powerful, self-hosted solution for automatically scaling Azure resources based on real-time metrics, schedules, and usage forecasts. It helps optimize costs while maintaining performance for various Azure services.
+
+## Features
+
+- **Real-time Metric Based Scaling**: Scale resources based on actual usage patterns and performance metrics
+- **Schedule-Based Scaling**: Automatically adjust resources based on predefined schedules
+- **Usage Forecasting**: Predict future resource needs using AI-powered forecasting
+- **Self-hosted Solution**: Deploy as a containerized application in AKS or Azure Container Services
+- **Flexible Metric Analysis**: Create custom scaling rules using natural Lambda Expressions
+- **Multidimensional Scaling**: Target different dimensions for the same resource
+
+## Supported Resource Types
+
+| Resource Type | Supported Dimensions | Custom Metrics | Notes |
+|--------------|---------------------|----------------|-------|
+| AKS Node Pools | MinNodeCount, MaxNodeCount |  |  |
+| Azure SQL Elastic Pools | Dtu, MaxDataBytes |  |  |
+| Azure SQL Databases | Dtu, vCore |  |  |
+| Azure MySQL Flexible Server | Sku | custom_sku_corecount_forecast |  |
+| Azure File Shares | ProvisionedStorage |  |  |
 
 ## Installation
 
@@ -177,6 +198,8 @@ resource "kubernetes_deployment" "app" {
     }
   }
 }
+
+
 ```
 
 ### For container services
@@ -216,12 +239,6 @@ Resources:
   - R1
   - R2
 ```
-
-The relevant part of the configuration is the Resources array. This array contains a list of Resources that need to be scaled.
-
-> **Note**
->
-> A resource is actually a group of resources (of the same type) that share the same scaling configuration.
 
 ## Resource structure
 
@@ -287,6 +304,33 @@ As you can see in the previous example, a group of resources share a Resource Co
   * All scaling configurations are evaluated according to the **TimeWindow**. Multiple configurations can overlap without issues.
   * When multiple configurations overlap, and they provide different indications on scale dimension targets, the application will always utilize the **greatest** one.
 
+### Resource Expansion
+
+You can use resource expansion for the application to automatically discover all child resources of a given parent resource.
+
+For elasticpoools:
+
+```yaml
+  - Resources:
+      sbssqldevshared:
+        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/*"
+```
+
+If you want to target a specific subset of resource, you can use a regular expression:
+
+```yaml
+  - Resources:
+      sbssqldevshared:
+        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/{^pool-}"
+```
+
+Resource expansion works for:
+
+* File shares in a storage account
+* Node pools in an AKS cluster
+* SQL Databases in an Azure SQL Server
+* SQL Elastic Pools in an Azure SQL Server
+
 ### Metrics
 
 Because you need to make real time decisions based on resource metrics, each Scaling Configuration can declare a set of metrics that will be evaluated on the resource and made available for usage in the scaling rules.
@@ -334,8 +378,6 @@ A scaling rule consists of three basic concepts:
 * Others: depending on the strategy used, different attributes will govern the behavior of the rule
 
 ### Scaling Rules: autoadjust
-
-
 
 ```yaml
           autoadjust:
