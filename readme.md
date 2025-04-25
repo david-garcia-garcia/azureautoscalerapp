@@ -1,4 +1,6 @@
-[TOC]
+Visit us at 
+
+www.AzureAutoscaler.com
 
 # Azure Autoscaler Reference
 
