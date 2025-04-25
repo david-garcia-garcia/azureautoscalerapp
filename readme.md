@@ -28,6 +28,32 @@ locals {
       name = "my-aks-cluster-name"
       resource_group_name = "my-aks-cluster-resource-group"
    }
+   app_image = "url-to-image"
+   app_image_login_server = ""
+   app_image_username = ""
+   app_image_password = ""
+}
+
+resource "kubernetes_secret" "acr_secret" {
+  provider = kubernetes.cluster
+  metadata {
+    name      = "azureautoscaler"
+    namespace = local.aks_namespace
+  }
+
+  data = {
+    ".dockerconfigjson" = jsonencode({
+      auths = {
+        "${local.app_image_login_server}" = {
+          username = azurerm_container_registry_token.token.name
+          password = azurerm_container_registry_token_password.password.password1[0].value
+          auth     = base64encode("${local.app_image_username}:${local.app_image_password}")
+        }
+      }
+    })
+  }
+
+  type = "kubernetes.io/dockerconfigjson"
 }
 
 # Cluster info
@@ -124,7 +150,7 @@ resource "kubernetes_deployment" "app" {
       }
       spec {
         image_pull_secrets {
-          name = var.application_settings.image_pull_secret
+          name = kubernetes_secret.acr_secret.metadata[0].name
         }
 
 		# Important
@@ -132,14 +158,12 @@ resource "kubernetes_deployment" "app" {
 
         container {
           name  = "app"
-          image = local.app_image_to_use
-
+          image = local.app_image
           volume_mount {
             name       = "config-yml"
             mount_path = "/app/config.yml"
             sub_path   = "config.yml"
           }
-
         }
         volume {
           name = "config-yml"
@@ -258,5 +282,70 @@ As you can see in the previous example, a group of resources share a Resource Co
 * **WhatIf**: you can set this to true prevent the application from actually manipulating the resources. This will let you see what the application would have done by analyzing the logs and ensure you are comfortable with the scaling configuration.
 * **Enabled**: effectively disables the Resource Configuration
 * **ScalingConfiguration**: A map containing each one of the scaling configurations that will be evaluated for the resource, it is important to note that:
-  * All scaling configurations are always evaluated according to the TimeWindow. Multiple configurations can overlap without issues.
+  * All scaling configurations are evaluated according to the **TimeWindow**. Multiple configurations can overlap without issues.
   * When multiple configurations overlap, and they provide different indications on scale dimension targets, the application will always utilize the **greatest** one.
+
+### Metrics
+
+Because you need to make real time decisions based on resource metrics, each Scaling Configuration can declare a set of metrics that will be evaluated on the resource and made available for usage in the scaling rules.
+
+```yaml
+  - Resources:
+      sbssqldevshared_dev_sbssqlpooldevshared:
+        ResourceId: "/subscriptions/xx/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/account/fileServices/default/shares/share"
+    ScalingConfigurations:
+      Baseline:
+        Metrics:
+          FileCapacity:
+            # Name is the name of the metric in Azure Metrics
+            Name: FileCapacity
+            # (OPTIONAL) resourceID indicates what resource to get the metric from. Sometimes the metrics for some resource actually belong to the parent resource, and are accesed through the usag eof splits. If not specified, the actual ID of the configured resource will be used.
+            ResourceId: "/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/fileServices/default"
+            # Evaluation window. Metric evaluation will retrieve data from (Now - Window) to Now
+            Window: 02:00:00
+            # TimeGrain, as defined in the Azure metricsA
+            TimeGrain: 01:00:00 
+            # (OPTIONAL) SplitName
+            SplitName: "FileShare"
+            # (OPTIONAL) SplitValue
+            SplitValue: "apptemp"
+            # (OPTIONAL) Manipulate the individual metric values before sendig them to 
+            Transform: "(value) => value / (1000 * 1000 * 1000)" # Convert to Gb
+          storage_used:
+            Name: storage_used
+            Window: 00:05
+```
+
+
+
+### Scaling Rules
+
+A scaling rule determines a target value for one of the resources dimensions. A dimensions is an attribute on the target resources (i..e DTU for elastic pools, IOPS or MaxSyzeBytes for FileShares), consider that:
+
+* A resource can have more than one Dimension and these dimensions might have dependencies (i.e. the provisioned storage in an Azure Sql Elastic Pool is dependant on the provisioned DTU's). You do not have to worry about this. Create a scaling rule that actuates on the dimension that you are interested in a and the system will automatically determine the smallest compatible value for the other dimensions if needed.
+* The Autoscaler dimensions **do not always match** one to one the dimensions of the real Azure Resource. I.e. the MySqlFlexible server exposes SKU and CoreCount dimensions, but the Azure resource only know about SKU. The autoscaler will automatically translate these virtual dimensions into what the target resource is expecting (i.e. if you specify a CoreCount,  it will find the nearest SKU that complies with your request). The purpose of this is to facilitate making decisions on resource metrics.
+
+A scaling rule consists of three basic concepts:
+
+* **The scaling strategy**: this determines how the scaling rule will be evaluated.
+* **The dimension**: what dimension will this rule manipulate
+* Others: depending on the strategy used, different attributes will govern the behavior of the rule
+
+### Scaling Rules: autoadjust
+
+
+
+```yaml
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: Dtu
+            ScaleUpCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Take(3).Average() > 85" # Average DTU > 85% for 3 minutes
+            ScaleDownCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Take(5).Average() < 60" # Average DTU < 60% for 5 minutes
+            ScaleUpTarget: "(data) => data.NextDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleDownTarget: "(data) => data.PreviousDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleUpCooldownSeconds: 180
+            ScaleDownCoolDownSeconds: 3600
+            DimensionValueMax: "200"
+            DimensionValueMin: "50"
+```
+
