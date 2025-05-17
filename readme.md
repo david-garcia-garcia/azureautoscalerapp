@@ -21,9 +21,9 @@ Azure Autoscaler is a powerful, self-hosted solution for automatically scaling A
 |--------------|---------------------|----------------|-------|
 | AKS Node Pools | MinNodeCount, MaxNodeCount |  |  |
 | Azure SQL Elastic Pools | Dtu, MaxDataBytes |  |  |
-| Azure SQL Databases | Dtu, vCore |  |  |
-| Azure MySQL Flexible Server | Sku | custom_sku_corecount_forecast |  |
-| Azure File Shares | ProvisionedStorage |  |  |
+| Azure SQL Databases | Dtu |  |  |
+| Azure MySQL Flexible Server | Sku, Iops, CoreCount | custom_sku_corecount_forecast |  |
+| Azure Files | ProvisionedStorage |  |  |
 
 ## Installation
 
@@ -249,9 +249,9 @@ In this simple example, we will be scaling two Azure Sql Elastic Pools so that t
 ```yaml
   - Resources:
       sbssqldevshared_dev_sbssqlpooldevshared:
-        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/pool1"
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/mysourcegroup/providers/Microsoft.Sql/servers/sql0/elasticPools/pool1"
       sbssqldevshared_dev_sbssqlpooldevshared2:
-        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/pool2"
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/mysourcegroup/providers/Microsoft.Sql/servers/sql0/elasticPools/pool2"
     Frequency: 5m
     WhatIf: true
     Enabled: true
@@ -300,7 +300,7 @@ As you can see in the previous example, a group of resources share a Resource Co
 * **Frequency**: how often should this resource state should be evaluated.
 * **WhatIf**: you can set this to true prevent the application from actually manipulating the resources. This will let you see what the application would have done by analyzing the logs and ensure you are comfortable with the scaling configuration.
 * **Enabled**: effectively disables the Resource Configuration
-* **ScalingConfiguration**: A map containing each one of the scaling configurations that will be evaluated for the resource, it is important to note that:
+* **ScalingConfigurations**: A map containing each one of the scaling configurations that will be evaluated for the resource, it is important to note that:
   * All scaling configurations are evaluated according to the **TimeWindow**. Multiple configurations can overlap without issues.
   * When multiple configurations overlap, and they provide different indications on scale dimension targets, the application will always utilize the **greatest** one.
 
@@ -313,7 +313,7 @@ For elasticpoools:
 ```yaml
   - Resources:
       sbssqldevshared:
-        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/*"
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/myresourcegroup/providers/Microsoft.Sql/servers/sql0/elasticPools/{.*}"
 ```
 
 If you want to target a specific subset of resource, you can use a regular expression:
@@ -321,7 +321,7 @@ If you want to target a specific subset of resource, you can use a regular expre
 ```yaml
   - Resources:
       sbssqldevshared:
-        ResourceId: "/subscriptions/xxx/resourceGroups/rg-dev-shared/providers/Microsoft.Sql/servers/sql0/elasticPools/{^pool-}"
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/myresourcegroup/providers/Microsoft.Sql/servers/sql0/elasticPools/{^pool-}"
 ```
 
 Resource expansion works for:
@@ -351,25 +351,27 @@ Because you need to make real time decisions based on resource metrics, each Sca
             Window: 02:00:00
             # TimeGrain, as defined in the Azure metricsA
             TimeGrain: 01:00:00 
-            # (OPTIONAL) SplitName
+            # (OPTIONAL) SplitName. You can use resource replace groups in the splitname.
             SplitName: "FileShare"
-            # (OPTIONAL) SplitValue
+            # (OPTIONAL) SplitValue. You can use resource replace groups in the splitname.
             SplitValue: "apptemp"
-            # (OPTIONAL) Manipulate the individual metric values before sendig them to 
+            # (OPTIONAL) Aggregations. What aggregations to be retrieved for the metric. If not specified defaults
+            # to "Average". Careful with this because the default Average is not the default behaviour for all metrics
+            # in the portal, where some resource have different aggregations set as default.
+            Aggregations: ["Total"]
+            # (OPTIONAL) Manipulate the individual metric values before sendig them to evaluation 
             Transform: "(value) => value / (1000 * 1000 * 1000)" # Convert to Gb
           storage_used:
             Name: storage_used
             Window: 00:05
 ```
 
-
-
 ### Scaling Rules
 
 A scaling rule determines a target value for one of the resources dimensions. A dimensions is an attribute on the target resources (i..e DTU for elastic pools, IOPS or MaxSyzeBytes for FileShares), consider that:
 
-* A resource can have more than one Dimension and these dimensions might have dependencies (i.e. the provisioned storage in an Azure Sql Elastic Pool is dependant on the provisioned DTU's). You do not have to worry about this. Create a scaling rule that actuates on the dimension that you are interested in a and the system will automatically determine the smallest compatible value for the other dimensions if needed.
-* The Autoscaler dimensions **do not always match** one to one the dimensions of the real Azure Resource. I.e. the MySqlFlexible server exposes SKU and CoreCount dimensions, but the Azure resource only know about SKU. The autoscaler will automatically translate these virtual dimensions into what the target resource is expecting (i.e. if you specify a CoreCount,  it will find the nearest SKU that complies with your request). The purpose of this is to facilitate making decisions on resource metrics.
+* A resource can have more than one Dimension and these dimensions might have dependencies (i.e. the provisioned storage in an Azure Sql Elastic Pool is dependant on the provisioned DTU's). You do not have to worry about this. Create a scaling rule that actuates on the dimension that you are interested in and the system will automatically determine the smallest compatible value for the other dimensions if needed.
+* The Autoscaler dimensions **do not always match** one to one the dimensions of the real Azure Resource. I.e. the MySqlFlexible server exposes SKU and CoreCount dimensions, but the Azure resource only know about SKU. The autoscaler will automatically translate these virtual dimensions into what the target resource is expecting (i.e. if you specify a CoreCount,  it will find the nearest SKU that complies with your request). The purpose of this is to facilitate making decisions on resource metrics that will not reflect directly SKU definitions.
 
 A scaling rule consists of three basic concepts:
 
@@ -377,7 +379,30 @@ A scaling rule consists of three basic concepts:
 * **The dimension**: what dimension will this rule manipulate
 * Others: depending on the strategy used, different attributes will govern the behavior of the rule
 
-### Scaling Rules: autoadjust
+### Scaling Rule Strategy Fixed
+
+```yaml
+#######################################
+# Example to always have 50GB or extra
+# 20% disk space provisioned in file shares
+# whatever is greater
+#######################################
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: MaxDataBytes
+            # Fix target of extra 50GB or 20% additional of current storage, whatever is greater.
+            ScaleTarget: "(data) => (Math.Max(data.Metrics[\"storage_used\"].Values.First().Average.Value + (50.1*1024*1024*1024), data.Metrics[\"storage_used\"].Values.First().Average.Value * 1.2)).ToString()"
+```
+
+The fixed strategy is useful to apply minimum values to resource dimensions. I.e. you might have an Azure SQL server scale DTU based on load, but you do not want it to go below a certain threshold, used fixed to set it. Remember that the scaler uses the greatest of all proposed values by scaling rules.
+
+Supported attributes are:
+
+* **Dimension**: the dimensions this rule actuates on
+* **ScaleTarget**: the dimension target value. You can use .Net lambda expressions here to analyze and make decisions based on the metrics.
+
+### Scaling Rule Strategy Autoadjust
 
 ```yaml
           autoadjust:
@@ -391,5 +416,279 @@ A scaling rule consists of three basic concepts:
             ScaleDownCoolDownSeconds: 3600
             DimensionValueMax: "200"
             DimensionValueMin: "50"
+```
+
+The autoadjust is designed to react based on metrics:
+
+* **Dimension**: What resource dimension will this rule be manipulating. ScaleUpTarget and ScaleDownTarget must return compatible values with this dimension. I.e. if the dimensions is SKU, they must return valid SKU's for the resource.
+* **ScaleUpCondition**: Boolean indicating that the value returned by ScaleUpTarget should be used.
+* **ScaleDownCondition**: Boolean indicating that the value return by ScaleDownTarget should be used.
+* **ScaleUpCooldownSeconds**: After a scale operation, minimum amount of time required to allow a new upscale operation.
+* **ScaleDownCooldDownSeconds**: After a scale operation, minimum amount of time required to allow a new downscale operation.
+* **DimensionValueMax**: Upper limit that both ScaleUpTarget and ScaleDownTarget will be capped. (yes, you could take care of this within the lambda expression itself, it is just here for convenience)
+* **DimensionValueMin**: Lower limit that both ScaleUpTarget and ScaleDownTarget will be capped. (yes, you could take care of this within the lambda expression itself, it is just here for convenience)
+
+> [!NOTE]
+>
+> If neither scale up or scale down conditions are met, the target value for the dimensions will be the current dimension of the resource.
+
+# Examples
+
+## AKS Node Pool
+
+```yaml
+  - Resources: 
+      aks_dev_nodepools:
+        ResourceId: "/subscriptions/mysubscriptionid/resourceGroups/myresourcegroup/providers/Microsoft.ContainerService/managedClusters/mycluster/agentPools/{.*}"
+    Frequency: 5m
+    ScalingConfigurations:
+      baseline:
+        Metrics:
+          node_cpu_usage_percentage:
+            Name: Percentage CPU
+            Window: 00:10
+            ResourceId: "${virtualMachineScaleSetId}"
+            # This is not working for windows nodes, so we need to pick up directly the VMSS
+            # https://github.com/Azure/AKS/issues/5001
+            #Name: node_cpu_usage_percentage
+            #SplitName: nodepool
+            #SplitValue: ${nodePoolName}
+            #ResourceId: "/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/providers/Microsoft.ContainerService/managedClusters/${clusterName}"
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: MinNodeCount
+            DimensionValueMax: "5"
+            DimensionValueMin: "1"
+            ScaleUpCondition: "(data) => data.Metrics[\"node_cpu_usage_percentage\"].Values.Select(i => i.Average).Take(3).Average() > 80" # Average DTU > 85% for 3 minutes
+            ScaleDownCondition: "(data) => data.Metrics[\"node_cpu_usage_percentage\"].Values.Select(i => i.Average).Take(10).Average() < 60" # Average DTU < 60% for 5 minutes
+            ScaleUpTarget: "(data) => data.NextDimensionValue(1)"
+            ScaleDownTarget: "(data) => data.PreviousDimensionValue(1)"
+            ScaleUpCooldownSeconds: 300
+            ScaleDownCooldownSeconds: 1200
+```
+
+## SQL Elastic Pool
+
+```yaml
+  - Resources:
+      sbssqldevshared_pools:
+        ResourceId: "/subscriptions/mysubscriptionid/resourceGroups/myresourcegroup/providers/Microsoft.Sql/servers/mypool/elasticPools/{.*}"
+      sbsmssqlprodshared_pools:
+        ResourceId: "/subscriptions/mysubscriptionid/resourceGroups/myresourcegroup/providers/Microsoft.Sql/servers/mypool2/elasticPools/{.*}"
+    Frequency: 3m
+    WhatIf: false
+    ScalingConfigurations:
+      Baseline:
+        ScaleDownLockWindowMinutes: 50
+        ScaleUpAllowWindowMinutes: 58
+        Metrics:
+          dtu_consumption_percent:
+            Name: dtu_consumption_percent
+            Window: 00:05
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: Dtu
+            ScaleUpCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Select(i => i.Average).Take(3).Average() > 80" # Average DTU > 85% for 3 minutes
+            ScaleDownCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Select(i => i.Average).Take(5).Average() < 60" # Average DTU < 60% for 5 minutes
+            ScaleUpTarget: "(data) => data.NextDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleDownTarget: "(data) => data.PreviousDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleUpCooldownSeconds: 180
+            ScaleDownCoolDownSeconds: 3600
+            DimensionValueMax: "200"
+            DimensionValueMin: "50"
+      MaxDataBytes:
+        Metrics:
+          storage_used:
+            Name: storage_used
+            Window: 00:05
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: MaxDataBytes
+            # Fix target of extra 50GB or 20% additional of current storage, whatever is greater.
+            ScaleTarget: "(data) => (Math.Max(data.Metrics[\"storage_used\"].Values.First().Average.Value + (50.1*1024*1024*1024), data.Metrics[\"storage_used\"].Values.First().Average.Value * 1.2)).ToString()"
+```
+
+## SQL Database
+
+```yaml
+  - Resources:
+      sqlsrvdatosetg_db:
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/databases/providers/Microsoft.Sql/servers/myserver/databases/*"
+    Frequency: 5m
+    WhatIf: false
+    ScalingConfigurations:
+      Baseline:
+        ScaleDownLockWindowMinutes: 50
+        ScaleUpAllowWindowMinutes: 50
+        Metrics:
+          dtu_consumption_percent:
+            Name: dtu_consumption_percent
+            Window: 00:05
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: Dtu
+            ScaleUpCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Select(i => i.Average).Take(3).Average() > 85" # Average DTU > 85% for 3 minutes
+            ScaleDownCondition: "(data) => data.Metrics[\"dtu_consumption_percent\"].Values.Select(i => i.Average).Take(5).Average() < 60" # Average DTU < 60% for 5 minutes
+            ScaleUpTarget: "(data) => data.NextDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleDownTarget: "(data) => data.PreviousDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleUpCooldownSeconds: 180
+            ScaleDownCoolDownSeconds: 3600
+            DimensionValueMax: "200"
+            DimensionValueMin: "10"
+```
+
+## MySQL Flexible Server
+
+```yaml
+  - Resources:
+      mysql-dev-mysql0:
+        ResourceId: "/subscriptions/mysubscriptionid/resourceGroups/myresourcegroup/providers/Microsoft.DBforMySQL/flexibleServers/myserver"
+    Frequency: 5m
+    ScalingConfigurations:
+      Baseline:
+        ScaleDownLockWindowMinutes: 50
+        ScaleUpAllowWindowMinutes: 50
+        Metrics:
+          cpu_percent:
+            Name: cpu_percent
+            Window: 00:10
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          # Considering the downtime when resizing MySQL flexible server, I would not have this autoadjust rule here
+          # except for development or qa environments.
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: Sku
+            ScaleUpCondition: "(data) => data.Metrics[\"cpu_percent\"].Values.Select(i => i.Average).Take(3).Average() > 85" # Average DTU > 85% for 3 minutes
+            ScaleDownCondition: "(data) => data.Metrics[\"cpu_percent\"].Values.Select(i => i.Average).Take(5).Average() < 60" # Average DTU < 60% for 5 minutes
+            ScaleUpTarget: "(data) => data.NextDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleDownTarget: "(data) => data.PreviousDimensionValue(1)" # You could actually specificy DTU number manually, and system will find closes valid tier
+            ScaleUpCooldownSeconds: 180
+            ScaleDownCoolDownSeconds: 3600
+            DimensionValueMax: "Standard_B4ms"
+            DimensionValueMin: "Standard_B1ms"
+      ForecastDaily:
+        Metrics:
+          custom_sku_corecount_forecast:
+            Name: custom_sku_corecount_forecast # This metrics provides a SKU forecast based on last 90 days of activity so that no resizing is needed within the proposed time window. It's internals are currently hardcoded and should be parameterized. Useful because MySQL resizing is very disruptive (i.e. ~5 min downtime). 
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: "Romance Standard Time"
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: Sku
+            ScaleTarget: "(data) => (np(data.Metrics[\"custom_sku_corecount_forecast\"].Values.FirstOrDefault()).CustomString).ToString()"
+      MinSku:
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: "Romance Standard Time"
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: Sku
+            ScaleTarget: "(data) => (\"Standard_B1ms\")"
+      Iops:
+        Metrics:
+          storage_io_count:
+            Name: storage_io_count
+            Window: "00:05"
+            Granularity: "00:01"
+            Aggregations: ["Total"]
+          io_consumption_percent:
+            Name: io_consumption_percent
+            Window: 00:10
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: "Romance Standard Time"
+        ScalingRules:
+          autoadjust:
+            ScalingStrategy: Autoadjust
+            Dimension: Iops
+            ScaleUpCondition: "(data) => data.Metrics[\"io_consumption_percent\"].Values.Select(i => i.Average).Take(5).Average() > 85"
+            ScaleDownCondition: "(data) => data.Metrics[\"io_consumption_percent\"].Values.Select(i => i.Average).Take(5).Average() < 80"
+            ScaleUpTarget: "(data) => ((data.Metrics[\"storage_io_count\"].Values.Select(i => i.Total).Take(5).Average() / 60.1) * 1.2).ToString()"
+            ScaleDownTarget: "(data) => ((data.Metrics[\"storage_io_count\"].Values.Select(i => i.Total).Take(5).Average() / 60.1) * 0.8).ToString()"
+            ScaleUpCooldownSeconds: 180
+            ScaleDownCoolDownSeconds: 3600
+            DimensionValueMax: "1500"
+            DimensionValueMin: "400"
+```
+
+## Azure Files
+
+```yaml
+  - Resources:
+      stdevappsharedfiles:
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/myresourcegroup/providers/Microsoft.Storage/storageAccounts/mystorageaccount/fileServices/default/shares/{^(?!apptemp$)([a-zA-Z0-9]+)$}"
+    Frequency: 30m
+    Enabled: true
+    WhatIf: false
+    ScalingConfigurations:
+      Baseline:
+        Metrics:
+          FileCapacity:
+            Name: FileCapacity
+            ResourceId: "/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/fileServices/default"
+            Window: 02:00:00
+            TimeGrain: 01:00:00 
+            SplitName: "FileShare"
+            SplitValue: "${fileShareName}"
+            Aggregations: ["Average"]
+            Transform: "(value) => value.SetAverage(value.Average / (1000 * 1000 * 1000))" # Convert to Gb
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: ProvisionedStorage
+            # Fixed +50 GB above whatever is being used
+            ScaleTarget: "(data) => (data.Metrics[\"FileCapacity\"].Values.First().Average + 50).ToString()"
 ```
 
