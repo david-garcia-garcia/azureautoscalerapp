@@ -29,6 +29,75 @@ Azure Autoscaler is a powerful, self-hosted solution for automatically scaling A
 
 The Azure Autoscaler application is distributed as a container image, and needs to be deployed to a runtime of your choice. You also need to ensure the application is granted permissions to act on your Azure Resources in order to perform scaling operations.
 
+### Locally with docker
+
+> [!Note]
+>
+> You can run the autoscaler locally using docker and authorize it against your Azure resources using your Entra account. To do so, use DeviceCodeCredential option in AzureCredentialType in the configuration file.
+
+Create a compose.yaml file:
+
+```yaml
+services:
+  app:
+    image: davidbcn86/azureautoscaler:v2.0.0-private.beta.10
+    volumes:
+      - ./config.yml:/app/config.yml
+```
+
+Create a configuration file:
+
+```yaml
+DefaultResourceWhatIf: true
+DefaultResourceEnabled: true
+DefaultResourceFrequency: 10m
+AzureCredentialType: DeviceCodeCredential # Only for local testing
+Logging:
+  LogLevel:
+    Default: "Debug"
+    Microsoft.Hosting.Lifetime: "Debug"
+  Console:
+    FormatterName: "simple"
+    FormatterOptions:
+      SingleLine: true
+      TimestampFormat: "HH:HH:mm:ss"
+Resources:
+  - Resources:
+      stdevappsharedfiles:
+        ResourceId: "/subscriptions/mysubscription/resourceGroups/myresourcegroup/providers/Microsoft.Storage/storageAccounts/mystorageaccount/fileServices/default/shares/{.*}"
+    Frequency: 30m
+    ScalingConfigurations:
+      Baseline:
+        Metrics:
+          FileCapacity:
+            Name: FileCapacity
+            ResourceId: "/subscriptions/${subscriptionId}/resourceGroups/${resourceGroupName}/providers/Microsoft.Storage/storageAccounts/${storageAccountName}/fileServices/default"
+            Window: 02:00:00
+            TimeGrain: 01:00:00 
+            SplitName: "FileShare"
+            SplitValue: "${fileShareName}"
+            Aggregations: ["Average"]
+            Transform: "(value) => value.SetAverage(value.Average / (1000 * 1000 * 1000))" # Convert to Gb
+        TimeWindow:
+          Days: All
+          Months: All
+          StartTime: "00:00"
+          EndTime: "23:59"
+          TimeZone: UTC
+        ScalingRules:
+          fixed:
+            ScalingStrategy: Fixed
+            Dimension: ProvisionedStorage
+            # Fixed +50 GB above whatever is being used
+            ScaleTarget: "(data) => (data.Metrics[\"FileCapacity\"].Values.First().Average + 50).ToString()"
+```
+
+Start the image with docker:
+
+```powershell
+docker compose up
+```
+
 ### For kubernetes (with terraform examples)
 
 Relevant readings:
