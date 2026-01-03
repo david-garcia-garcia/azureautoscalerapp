@@ -48,6 +48,12 @@
     ul li {
       padding-top: 10px;
     }
+    .nav-item-contact {
+      display: none !important;
+    }
+    section#contact {
+      display: none !important;
+    }
   </style>
 </head>
 
@@ -69,7 +75,8 @@
               <li class="nav-item"> <a class="nav-link lh-xl" href="#home">Home</a></li>
               <li class="nav-item"> <a class="nav-link lh-xl" href="#features">Features</a></li>
               <li class="nav-item"> <a class="nav-link lh-xl" href="#how-it-works">How It Works</a></li>
-              <li class="nav-item"> <a class="nav-link lh-xl" href="#contact">Contact</a></li>
+              <li class="nav-item nav-item-contact"> <a class="nav-link lh-xl" href="#contact">Contact</a></li>
+              <li class="nav-item"> <a class="nav-link lh-xl" href="https://github.com/david-garcia-garcia/azureautoscaler" target="_blank" rel="noopener noreferrer"><span class="uil uil-github me-1"></span>GitHub</a></li>
             </ul>
           </div>
         </div>
@@ -131,6 +138,7 @@
                   <h2 class="fs-4 fs-lg-3 fw-bold mb-2 text-center text-lg-start">Smart Scaling Features</h2>
                   <p class="fs-8 mb-4 mb-lg-5 lh-lg text-center text-lg-start fw-normal">Optimize your Azure resources
                     automatically. Deploy and forget.</p>
+                  <p class="fs-8 mb-4 mb-lg-5 lh-lg text-center text-lg-start fw-normal"><a href="https://github.com/david-garcia-garcia/azureautoscaler" target="_blank" rel="noopener noreferrer">View all features and detailed documentation on GitHub <span class="uil uil-external-link-alt"></span></a></p>
                 </div>
                 <div class="col-12">
                   <div class="mb-x1 mb-lg-3">
@@ -237,27 +245,15 @@
           <div class="row justify-content-center">
             <div class="col-md-8 col-lg-7">
               <h3 class="fs-4 fs-lg-3 fw-bold text-center mb-2 mb-lg-x1">Buy</h3>
-              <p class="fs-8 mb-7 mb-lg-8 text-center lh-lg">Use the contact us form if you have any questions or feedback</p>
             </div>
             <div class="col-12">
-              <div style="display:flex; align-items:flex-start !important;"
-                class="row g-sm-2 g-lg-2 align-items-center timeline">
-                <div
-                  class="col-12 col-lg-6 d-flex flex-row flex-lg-column justify-content-center gap-2 gap-sm-x1 gap-md-4 gap-lg-0">
-                  <div id="paypal-container-9XVH4588VMR5Q"></div>
+              <div class="row justify-content-center">
+                <div class="col-12 col-md-auto">
+                  <div id="paypal-container-L8PPM27WKB8SJ" style="min-width: 200px; width: 100%; max-width: 500px; margin: 0 auto;"></div>
                   <script>
                     paypal.HostedButtons({
-                      hostedButtonId: "9XVH4588VMR5Q",
-                    }).render("#paypal-container-9XVH4588VMR5Q")
-                  </script>
-                </div>
-                <div
-                  class="col-12 col-lg-6 d-flex flex-row flex-lg-column justify-content-center gap-2 gap-sm-x1 gap-md-4 gap-lg-0">
-                  <div id="paypal-container-LD6NCD9NM5JTN"></div>
-                  <script>
-                    paypal.HostedButtons({
-                      hostedButtonId: "LD6NCD9NM5JTN",
-                    }).render("#paypal-container-LD6NCD9NM5JTN")
+                      hostedButtonId: "L8PPM27WKB8SJ",
+                    }).render("#paypal-container-L8PPM27WKB8SJ")
                   </script>
                 </div>
               </div>
@@ -267,7 +263,7 @@
 
         
 
-        <section class="bg-300 position-relative z-0" id="contact">
+        <section class="bg-300 position-relative z-0" id="contact" style="display: none !important;">
           <div class="container py-8 py-lg-9">
             <div class="row justify-content-center">
               <div class="col-md-8 col-lg-8">
